@@ -715,7 +715,7 @@ def sample_ddim(model, x_cond, diffusion_params, n_inference_steps=50, total_tim
 
 
 @torch.no_grad()
-def test_and_visualize(model, test_loader, diffusion_params, save_dir, num_samples=10, n_inference_steps=50, device='cuda'):
+def test_and_visualize(model, test_loader, diffusion_params, save_dir, num_samples=10, n_inference_steps=50, device='cuda', eta=0.5):
     """
     Test the model and save visualizations of original vs predicted images.
     Args:
@@ -750,10 +750,10 @@ def test_and_visualize(model, test_loader, diffusion_params, save_dir, num_sampl
                 model=model,
                 x_cond=test_batch,  # Your first two channels for conditioning
                 diffusion_params=diffusion_params,
-                n_inference_steps=50,
+                n_inference_steps=n_inference_steps,
                 total_timesteps=1000,
                 device=device,
-                eta=0.0  # 0 for deterministic DDIM, 1 for stochastic DDPM
+                eta=eta  # 0 for deterministic DDIM, 1 for stochastic DDPM
             )
             
             # Create figure for this sample
@@ -816,8 +816,9 @@ test_and_visualize(
     diffusion_params=diffusion_params,
     save_dir=save_directory,
     num_samples=10,  # Number of test samples to process
-    n_inference_steps=50,  # Number of DDIM sampling steps
-    device=device
+    n_inference_steps=500,  # Number of DDIM sampling steps
+    device=device,
+    eta=0.5  # 0 for deterministic DDIM, 1 for stochastic DDPM
 )
 
 
