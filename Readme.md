@@ -1,171 +1,55 @@
 # Time Series Prediction (Generation) Diffusion Model
 
-A conditional diffusion model for time series (stock market) data visualization and prediction using PyTorch. This project implements a DDIM-based approach to analyze and generate stock market patterns, with a focus on volume and price movements.
+A conditional Denoising Diffusion Implicit Model (DDIM) that encodes stock price/volume time series as multi-channel RGB images and learns to generate the post-cutoff price channel from the pre-cutoff conditioning channels.
 
-## Overview
+![Comparison sample](test_results/comparisons/sample_0.png)
+*Example test-set comparison: original vs. DDIM-generated channels for one trading-day sample (`test_results/comparisons/sample_0.png`).*
 
-This project consists of two main components:
-1. Data preprocessing and image generation from stock market time series
-2. A conditional diffusion model for learning and generating stock market patterns
+## Problem
 
-### Features
+Standard time-series forecasting models operate directly on numeric sequences. This project instead asks whether a stock's volume and price behavior can be represented as an image (one channel per signal) and whether a diffusion model can learn to fill in a missing channel — effectively treating "predict tomorrow's price movement" as an image-inpainting / conditional-generation problem.
 
-- Conditional diffusion model with UNet architecture
-- DDIM sampling for efficient inference
-- Multi-channel stock data visualization
-- Attention mechanism for better pattern recognition
-- Flexible GPU/CPU processing support
-- Custom dataset handling for stock market data
+## Approach
 
-## Requirements
+- **Data prep (`dataset_creation.py`)**: raw IBM stock data (`data/master_data_IBM.csv`, plus `batch1_IBM.csv` / `latest_data_IBM.csv`) is converted into per-day RGB images (see `stock_images/`), where:
+  - Red channel = trading volume
+  - Green channel = price changes *before* a cutoff time (conditioning signal)
+  - Blue channel = price changes *after* the cutoff time (the signal the model must generate)
+- **Model (`trainDDIM.py`)**: a conditional UNet (attention blocks, sinusoidal time embeddings, group norm, skip connections) is trained as a diffusion model. Only the blue (post-cutoff) channel is noised during training; the red/green channels are held fixed as conditioning input. Training runs for 10 epochs with an AdamW optimizer and an MSE noise-prediction loss (`training_DDIM.ipynb`).
+- **Sampling**: at inference, DDIM sampling (configurable number of steps, `eta` for stochastic/deterministic trade-off) reconstructs the blue channel from noise, conditioned on the red/green channels of a held-out test sample.
 
-```
-python >= 3.8
-torch >= 1.9.0
-torchvision
-numpy
-pandas
-matplotlib
-pillow
-GPUtil
-tqdm
-```
+## Result
 
-## Project Structure
+Across the 9 evaluated test samples in `training_DDIM.ipynb`, the reconstructed (blue/post-cutoff) channel had a mean squared error of **≈0.21** against the ground-truth channel (range ≈0.05–0.30 across samples); the red/volume and green/pre-cutoff-price channels are conditioning inputs, not generated, so their MSE is trivially 0. This says the model reproduces the conditioning signal exactly (as expected) and gets closer-than-random but noisy results on the channel it actually has to generate — read as a proof-of-concept result, not a tuned forecasting benchmark.
 
-```
-├── stock_images/          # Generated stock market images
-├── checkpoints/          # Model checkpoints
-├── data/                 # Raw stock market data
-│   └── master_data_IBM.csv
-├── test_results/        # Model evaluation results
-│   ├── comparisons/     # Original vs predicted comparisons
-│   └── intermediate_steps/  # Visualization of sampling steps
-```
+Qualitative outputs for all 10 sampled test cases are in `test_results/comparisons/` (original vs. generated channels, e.g. `sample_0.png`–`sample_9.png`) and `test_results/intermediate_steps/` (denoising trajectory per sample, e.g. `sample_0_steps.png`–`sample_9_steps.png`). A presentation-style summary graphic is at `linkedin_visuals/linkedin_visualization.png`.
 
-## Installation
+## How to run
 
-1. Clone the repository:
 ```bash
-git clone [repository-url]
+git clone <repository-url>
 cd DDIM_Time_Series
-```
-
-2. Install dependencies:
-```bash
 pip install -r requirements.txt
-```
 
-## Data Preparation
-
-The model expects stock market data in CSV format with the following columns:
-- timestamp
-- close (price)
-- volume
-
-To prepare your data:
-
-1. Place your CSV file in the `data/` directory
-2. Run the data preprocessing script:
-```python
+# 1. Place a CSV with timestamp/close/volume columns in data/, then build the RGB image dataset
 python dataset_creation.py
+
+# 2. Train the conditional DDIM (checkpoints saved every 10 epochs to checkpoints/)
+python trainDDIM.py
+
+# 3. Evaluate / sample: see training_DDIM.ipynb for the test_and_visualize() sampling and
+#    comparison-plot cells that produced test_results/
 ```
 
-This will generate RGB images where:
-- Red channel: Volume data
-- Green channel: Price changes before cutoff time
-- Blue channel: Price changes after cutoff time
-
-## Model Architecture
-
-The model uses a UNet architecture with:
-- Conditional diffusion process
-- Time embeddings
-- Attention blocks
-- Skip connections
-- Group normalization
-
-### Key Components:
-
-1. **UNet**: Main architecture for the diffusion process
-2. **AttentionBlock**: Self-attention mechanism for capturing long-range dependencies
-3. **Block**: Basic building block with residual connections
-4. **SinusoidalPositionEmbeddings**: Time step embeddings
-
-## Training
-
-To train the model:
-
-```python
-python trainDDIM.py 
-```
-
-Key parameters:
-- `batch_size`: Number of images per batch
-- `image_size`: Size of input images
-- `n_epochs`: Number of training epochs
-- `device`: "GPU" or "CPU"
-
-The model automatically saves checkpoints every 10 epochs in the `checkpoints/` directory.
-
-
-
-## Model Parameters
-
-- `n_timesteps`: 1000 (diffusion steps)
-- `base_channels`: 64
-- `channel_mults`: (1, 2, 4, 8)
-- `attention_resolutions`: (8, 16)
-- `time_emb_dim`: 256
-
-## Performance Optimization
-
-The code includes automatic GPU selection based on:
-- Available memory
-- Current GPU load
-- Memory utilization
-
-To optimize performance:
-1. Adjust batch size based on available GPU memory
-2. Modify number of sampling steps for inference speed/quality trade-off
-3. Use `eta` parameter in DDIM sampling to control stochasticity
-
-## Memory Management
-
-The model implements several memory optimization techniques:
-- Gradient checkpointing (optional)
-- Efficient attention computation
-- Automatic batch size adjustment
-- Checkpoint management with rolling window
-
-## Troubleshooting
-
-Common issues and solutions:
-
-1. **GPU Out of Memory**
-   - Reduce batch size
-   - Decrease image size
-   - Use gradient checkpointing
-
-2. **Data Loading Errors**
-   - Verify CSV file format
-   - Check for missing values
-   - Ensure correct time format
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
+Key model parameters (from `trainDDIM.py`): `n_timesteps=1000`, `base_channels=64`, `channel_mults=(1,2,4,8)`, `attention_resolutions=(8,16)`, `time_emb_dim=256`.
 
 ## License
-CC BY-NC: Non-commercial use with attribution
+
+Apache License 2.0 — see [`LICENSE`](LICENSE). Copyright 2026 Hojat Allah Salehi.
 
 ## Acknowledgments
 
-This project builds upon several key papers and implementations:
+This project builds on:
 - DDIM (Denoising Diffusion Implicit Models)
 - U-Net architecture
 - Attention mechanisms in deep learning
-
